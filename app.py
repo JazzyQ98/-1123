@@ -20,20 +20,26 @@ def calculate_pi(lambda_, mu, gamma, delta, alpha, beta):
         [lambda_, -(mu + gamma + alpha), 0, 0],
         [0, gamma, -delta, 0],
         [0, alpha, 0, -beta],
-        [1, 1, 1, 1]  # Условие нормировки
+        [1, 1, 1, 1]
     ])
-    
     b = np.array([0, 0, 0, 0, 1])
     
     try:
-        # Пытаемся решить систему точно
+        # Пытаемся решить систему
         pi = np.linalg.solve(A[:4,:4], b[:4])
     except np.linalg.LinAlgError:
-        # Если система вырождена, используем метод наименьших квадратов
+        # Если не получается, используем метод наименьших квадратов
         pi = np.linalg.lstsq(A, b, rcond=None)[0]
     
-    # Нормируем вероятности
+    # Нормировка
     pi /= np.sum(pi)
+    
+    # Отладочная информация внутри функции
+    with st.expander("Отладочная информация"):
+        st.write("Матрица A:")
+        st.write(A)
+        st.write("Сумма вероятностей:", np.sum(pi))
+    
     return pi[:4]  # Возвращаем только π₀-π₃
 
 # Интерфейс приложения

@@ -13,40 +13,43 @@ if 'params' not in st.session_state:
         'beta': 3.0
     }
 
-# Функция для расчета вероятностей
+# Функция для расчета вероятностей с отладкой
 def calculate_pi(lambda_, mu, gamma, delta, alpha, beta):
+    # Строим матрицу системы
     A = np.array([
         [-lambda_, mu, delta, beta],
         [lambda_, -(mu + gamma + alpha), 0, 0],
         [0, gamma, -delta, 0],
         [0, alpha, 0, -beta],
-        [1, 1, 1, 1]
+        [1, 1, 1, 1]  # Условие нормировки
     ])
+    
     b = np.array([0, 0, 0, 0, 1])
     
     try:
-        # Пытаемся решить систему
+        # Пробуем точное решение
         pi = np.linalg.solve(A[:4,:4], b[:4])
     except np.linalg.LinAlgError:
-        # Если не получается, используем метод наименьших квадратов
+        # Если система вырождена, используем МНК
         pi = np.linalg.lstsq(A, b, rcond=None)[0]
     
-    # Нормировка
+    # Нормируем вероятности
+    pi = np.abs(pi)  # Избегаем отрицательных значений
     pi /= np.sum(pi)
     
-    # Отладочная информация внутри функции
-    with st.expander("Отладочная информация"):
-        st.write("Матрица A:")
-        st.write(A)
-        st.write("Сумма вероятностей:", np.sum(pi))
+    # Отладочная информация
+    debug_info = {
+        "matrix": A,
+        "solution": pi,
+        "sum": np.sum(pi)
+    }
     
-    return pi[:4]  # Возвращаем только π₀-π₃
+    return pi[:4], debug_info  # Возвращаем и вероятности, и отладочные данные
 
 # Интерфейс приложения
 st.title("Модель установившегося режима СОИСН")
-st.markdown("Анализ вероятностей состояний системы обработки информации специального назначения.")
 
-# Боковая панель с параметрами
+# Боковая панель параметров
 st.sidebar.header("Параметры системы")
 params = st.session_state.params
 
@@ -77,7 +80,7 @@ params['beta'] = st.sidebar.slider(
 
 # Основные расчеты
 try:
-    pi = calculate_pi(**params)
+    pi, debug_info = calculate_pi(**params)  # Получаем и результаты, и отладочную информацию
     
     # Отображение результатов
     st.subheader("Результаты")
@@ -88,8 +91,7 @@ try:
         st.metric("Вероятность перегрузки (π₃)", f"{pi[3]*100:.2f}%")
     with col2:
         st.metric("Вероятность обработки (π₁)", f"{pi[1]*100:.2f}%")
-        st.metric("Коэффициент загрузки (ρ)", 
-                 f"{params['lambda_']/params['mu']:.2f}")
+        st.metric("Коэффициент загрузки (ρ)", f"{params['lambda_']/params['mu']:.2f}")
     
     # График распределения вероятностей
     fig1, ax1 = plt.subplots(figsize=(10, 5))
@@ -107,38 +109,47 @@ try:
         ("λ (входящий поток)", "μ (обработка)", "γ (сбои)")
     )
     
-    # Определяем диапазон значений для анализа
-    if selected_param == "λ (входящий поток)":
-        values = np.linspace(0.1, 30, 30)
-        current_params = params.copy()
-        param_key = 'lambda_'
-    elif selected_param == "μ (обработка)":
-        values = np.linspace(0.1, 30, 30)
-        current_params = params.copy()
-        param_key = 'mu'
-    else:
-        values = np.linspace(0.01, 5, 30)
-        current_params = params.copy()
-        param_key = 'gamma'
+    # Генерация значений для анализа
+    values = np.linspace(
+        st.sidebar.slider("Минимальное значение", 0.1, 5.0, 0.1),
+        st.sidebar.slider("Максимальное значение", 5.0, 30.0, 20.0),
+        30
+    )
     
-    # Расчет вероятностей перегрузки для разных значений параметра
     pi3_values = []
     for val in values:
-        current_params[param_key] = val
-        current_pi = calculate_pi(**current_params)
-        pi3_values.append(current_pi[3])
+        temp_params = params.copy()
+        if selected_param == "λ (входящий поток)":
+            temp_params['lambda_'] = val
+        elif selected_param == "μ (обработка)":
+            temp_params['mu'] = val
+        else:
+            temp_params['gamma'] = val
 
-# Построение графика чувствительности
+current_pi, _ = calculate_pi(**temp_params)
+        pi3_values.append(current_pi[3])
+    
+    # График чувствительности
     fig2, ax2 = plt.subplots(figsize=(10, 5))
     ax2.plot(values, pi3_values, 'o-', color='#9C27B0')
-    ax2.set_xlabel(selected_param.split(' ')[0] + f" ({'1/час'})")
+    ax2.set_xlabel(selected_param.split(' ')[0] + " (1/час)")
     ax2.set_ylabel("Вероятность перегрузки (π₃)")
     ax2.grid(True)
     st.pyplot(fig2)
 
+    # Отладочная информация
+    with st.expander("Техническая информация"):
+        st.write("Матрица системы:")
+        st.write(debug_info['matrix'])
+        st.write("Решение:", debug_info['solution'])
+        st.write(f"Сумма вероятностей: {debug_info['sum']:.6f}")
+        st.write(f"Собственные значения: {np.linalg.eigvals(debug_info['matrix'][:4,:4])}")
+
 except Exception as e:
     st.error(f"Ошибка в расчетах: {str(e)}")
-    st.write("Текущие параметры:", params)
+    if 'debug_info' in locals():
+        with st.expander("Отладочная информация"):
+            st.write("Матрица системы:", debug_info['matrix'])
 
 # Инструкция
 st.markdown("---")
@@ -148,15 +159,3 @@ st.info("""
 2. Результаты обновляются автоматически
 3. Используйте анализ чувствительности для исследования влияния параметров
 """)
-
-# Отладочная информация (можно скрыть)
-with st.expander("Отладочная информация"):
-    st.write("Матрица коэффициентов:")
-    A_matrix = np.array([
-        [-params['lambda_'], params['mu'], params['delta'], params['beta']],
-        [params['lambda_'], -(params['mu'] + params['gamma'] + params['alpha']), 0, 0],
-        [0, params['gamma'], -params['delta'], 0],
-        [0, params['alpha'], 0, -params['beta']]
-    ])
-    st.write(A_matrix)
-    st.write(f"Сумма вероятностей: {np.sum(pi):.6f}")

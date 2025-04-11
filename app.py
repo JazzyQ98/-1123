@@ -1,4 +1,3 @@
-Дмитрий, [12.04.2025 0:40]
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
@@ -113,8 +112,6 @@ try:
                                    st.session_state.params['beta'])
         elif param_name == "μ":
             current_pi = calculate_pi(st.session_state.params['lambda_'],
-
-Дмитрий, [12.04.2025 0:40]
 val,
                                    st.session_state.params['gamma'],
                                    st.session_state.params['delta'],

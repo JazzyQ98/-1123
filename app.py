@@ -13,9 +13,8 @@ if 'params' not in st.session_state:
         'beta': 3.0
     }
 
-# Функция для расчета вероятностей с отладкой
+# Функция для расчета вероятностей
 def calculate_pi(lambda_, mu, gamma, delta, alpha, beta):
-    # Строим матрицу системы
     A = np.array([
         [-lambda_, mu, delta, beta],
         [lambda_, -(mu + gamma + alpha), 0, 0],
@@ -27,24 +26,13 @@ def calculate_pi(lambda_, mu, gamma, delta, alpha, beta):
     b = np.array([0, 0, 0, 0, 1])
     
     try:
-        # Пробуем точное решение
         pi = np.linalg.solve(A[:4,:4], b[:4])
     except np.linalg.LinAlgError:
-        # Если система вырождена, используем МНК
         pi = np.linalg.lstsq(A, b, rcond=None)[0]
     
-    # Нормируем вероятности
     pi = np.abs(pi)  # Избегаем отрицательных значений
     pi /= np.sum(pi)
-    
-    # Отладочная информация
-    debug_info = {
-        "matrix": A,
-        "solution": pi,
-        "sum": np.sum(pi)
-    }
-    
-    return pi[:4], debug_info  # Возвращаем и вероятности, и отладочные данные
+    return pi[:4]
 
 # Интерфейс приложения
 st.title("Модель установившегося режима СОИСН")
@@ -80,7 +68,7 @@ params['beta'] = st.sidebar.slider(
 
 # Основные расчеты
 try:
-    pi, debug_info = calculate_pi(**params)  # Получаем и результаты, и отладочную информацию
+    pi = calculate_pi(**params)  # Исправленный вызов функции
     
     # Отображение результатов
     st.subheader("Результаты")
@@ -110,11 +98,7 @@ try:
     )
     
     # Генерация значений для анализа
-    values = np.linspace(
-        st.sidebar.slider("Минимальное значение", 0.1, 5.0, 0.1),
-        st.sidebar.slider("Максимальное значение", 5.0, 30.0, 20.0),
-        30
-    )
+    values = np.linspace(0.1, 30, 30) if selected_param != "γ (сбои)" else np.linspace(0.01, 5, 30)
     
     pi3_values = []
     for val in values:
@@ -125,8 +109,8 @@ try:
             temp_params['mu'] = val
         else:
             temp_params['gamma'] = val
-
-current_pi, _ = calculate_pi(**temp_params)
+            
+        current_pi = calculate_pi(**temp_params)  # Правильный вызов функции
         pi3_values.append(current_pi[3])
     
     # График чувствительности
@@ -137,19 +121,8 @@ current_pi, _ = calculate_pi(**temp_params)
     ax2.grid(True)
     st.pyplot(fig2)
 
-    # Отладочная информация
-    with st.expander("Техническая информация"):
-        st.write("Матрица системы:")
-        st.write(debug_info['matrix'])
-        st.write("Решение:", debug_info['solution'])
-        st.write(f"Сумма вероятностей: {debug_info['sum']:.6f}")
-        st.write(f"Собственные значения: {np.linalg.eigvals(debug_info['matrix'][:4,:4])}")
-
 except Exception as e:
     st.error(f"Ошибка в расчетах: {str(e)}")
-    if 'debug_info' in locals():
-        with st.expander("Отладочная информация"):
-            st.write("Матрица системы:", debug_info['matrix'])
 
 # Инструкция
 st.markdown("---")

@@ -16,16 +16,25 @@ if 'params' not in st.session_state:
 # Функция для расчета вероятностей
 def calculate_pi(lambda_, mu, gamma, delta, alpha, beta):
     A = np.array([
-        [-lambda_, mu, delta, beta],
+        [-lambda_, mu,      delta,  beta],
         [lambda_, -(mu + gamma + alpha), 0, 0],
-        [0, gamma, -delta, 0],
-        [0, alpha, 0, -beta],
-        [1, 1, 1, 1]
+        [0,       gamma,    -delta, 0],
+        [0,       alpha,    0,      -beta],
+        [1,       1,        1,      1]
     ])
-    b = np.array([0, 0, 0, 0, 1])
-    pi = np.linalg.lstsq(A, b, rcond=None)[0]
-    return pi
-
+    
+    # Решаем первые 4 уравнения
+    try:
+        pi = np.linalg.solve(A[:4,:4], [0,0,0,0])
+    except np.linalg.LinAlgError:
+        pi = np.linalg.lstsq(A[:4,:4], [0,0,0,0], rcond=None)[0]
+    
+    pi = np.append(pi, 0)  # Добавляем нулевую компоненту
+    pi /= pi.sum()         # Нормировка
+    return pi[:4]          # Возвращаем 4 вероятности
+st.write("Проверка матрицы A:")
+st.write(A)
+st.write("Сумма вероятностей:", sum(pi))
 # Заголовок приложения
 st.title("Модель установившегося режима СОИСН")
 st.markdown("""

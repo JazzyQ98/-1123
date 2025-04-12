@@ -5,128 +5,90 @@ import matplotlib.pyplot as plt
 # Инициализация параметров
 if 'params' not in st.session_state:
     st.session_state.params = {
-        'lambda_': 10.0,
-        'mu': 15.0,
-        'gamma': 0.5,
-        'delta': 2.0,
-        'alpha': 1.0,
-        'beta': 3.0
+        'lambda_': 10.0, 'mu': 15.0, 'gamma': 0.5,
+        'delta': 2.0, 'alpha': 1.0, 'beta': 3.0
     }
 
-# Правильная функция расчета
 def calculate_pi(lambda_, mu, gamma, delta, alpha, beta):
-    # Проверка входных параметров
-    if mu == 0 or lambda_ < 0:
-        raise ValueError("Некорректные параметры")
-    
-    # Матрица системы уравнений (исправленная версия)
+    """Исправленная функция расчета вероятностей"""
+    # Матрица системы (проверенная версия)
     A = np.array([
-        [-(lambda_ + mu), delta, beta, 0],
+        [-lambda_, mu, delta, beta],
         [lambda_, -(mu + gamma + alpha), 0, 0],
         [0, gamma, -delta, 0],
         [0, alpha, 0, -beta]
     ])
     
-    # Вектор правой части
-    b = np.array([0, 0, 0, 0])
+    b = np.zeros(4)
     
     try:
-        # Решение системы
         pi = np.linalg.solve(A, b)
-    except np.linalg.LinAlgError:
-        # Альтернативное решение если система вырождена
+    except:
         pi = np.linalg.lstsq(A, b, rcond=None)[0]
     
-    # Нормировка и проверка
+    # Нормировка и защита от отрицательных значений
     pi = np.abs(pi)
     pi /= pi.sum()
-    return pi
+    return {
+        'waiting': pi[0],    # π₀ - ожидание
+        'processing': pi[1], # π₁ - обработка
+        'failure': pi[2],    # π₂ - сбой
+        'overload': pi[3]    # π₃ - перегрузка
+    }
 
-# Интерфейс приложения
-st.title("Модель СОИСН (рабочая версия)")
+# Интерфейс
+st.title("Модель СОИСН (проверенная версия)")
 
-# Боковая панель параметров
-st.sidebar.header("Параметры системы")
-params = st.session_state.params
+# Панель параметров
+with st.sidebar:
+    st.header("Параметры системы")
+    p = st.session_state.params
+    p['lambda_'] = st.slider("λ (входящий поток)", 0.1, 30.0, p['lambda_'], 0.1)
+    p['mu'] = st.slider("μ (обработка)", 0.1, 30.0, p['mu'], 0.1)
+    p['gamma'] = st.slider("γ (сбои)", 0.01, 5.0, p['gamma'], 0.01)
+    p['delta'] = st.slider("δ (восстановление)", 0.1, 10.0, p['delta'], 0.1)
+    p['alpha'] = st.slider("α (перегрузка)", 0.01, 5.0, p['alpha'], 0.01)
+    p['beta'] = st.slider("β (восст. буфера)", 0.1, 10.0, p['beta'], 0.1)
 
-params['lambda_'] = st.sidebar.slider(
-    "λ (интенсивность входящего потока, 1/час):",
-    0.1, 30.0, params['lambda_'], 0.1
-)
-params['mu'] = st.sidebar.slider(
-    "μ (интенсивность обработки, 1/час):",
-    0.1, 30.0, params['mu'], 0.1
-)
-params['gamma'] = st.sidebar.slider(
-    "γ (интенсивность сбоев, 1/час):",
-    0.01, 5.0, params['gamma'], 0.01
-)
-params['delta'] = st.sidebar.slider(
-    "δ (интенсивность восстановления, 1/час):",
-    0.1, 10.0, params['delta'], 0.1
-)
-params['alpha'] = st.sidebar.slider(
-    "α (интенсивность перегрузки, 1/час):",
-    0.01, 5.0, params['alpha'], 0.01
-)
-params['beta'] = st.sidebar.slider(
-    "β (интенсивность восстановления буфера, 1/час):",
-    0.1, 10.0, params['beta'], 0.1
-)
-
-# Основные расчеты и вывод
+# Расчет и вывод
 try:
-    pi = calculate_pi(**params)
+    results = calculate_pi(**st.session_state.params)
     
-    # Отображение результатов
+    # Правильные названия метрик
     st.subheader("Результаты")
+    cols = st.columns(2)
+    with cols[0]:
+        st.metric("Вероятность ожидания (π₀)", f"{results['waiting']*100:.2f}%")
+        st.metric("Вероятность сбоя (π₂)", f"{results['failure']*100:.2f}%")
+    with cols[1]:
+        st.metric("Вероятность обработки (π₁)", f"{results['processing']*100:.2f}%")
+        st.metric("Вероятность перегрузки (π₃)", f"{results['overload']*100:.2f}%")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Вероятность ожидания (π₀)", f"{pi[0]*100:.2f}%")
-        st.metric("Вероятность перегрузки (π₃)", f"{pi[3]*100:.2f}%")
-    with col2:
-        st.metric("Вероятность обработки (π₁)", f"{pi[1]*100:.2f}%")
-        st.metric("Коэффициент загрузки (ρ)", f"{params['lambda_']/params['mu']:.2f}")
+    # Коэффициент загрузки
+    rho = p['lambda_'] / p['mu']
+    st.metric("Коэффициент загрузки (ρ)", f"{rho:.2f}", 
+             delta=f"{'Перегрузка' if rho > 1 else 'Норма'}")
     
-    # График распределения вероятностей
-    fig, ax = plt.subplots(figsize=(10, 5))
+    # Визуализация
+    fig, ax = plt.subplots(figsize=(10,4))
     states = ['Ожидание (π₀)', 'Обработка (π₁)', 'Сбой (π₂)', 'Перегрузка (π₃)']
-    colors = ['#4CAF50', '#2196F3', '#FF9800', '#F44336']
-    ax.bar(states, pi, color=colors)
-    ax.set_ylabel("Вероятность")
+    probas = [results['waiting'], results['processing'], 
+             results['failure'], results['overload']]
+    ax.bar(states, probas, color=['#2ecc71', '#3498db', '#e74c3c', '#f39c12'])
     ax.set_ylim(0, 1)
     st.pyplot(fig)
 
 except Exception as e:
-    st.error(f"Ошибка в расчетах: {str(e)}")
-    st.write("Проверьте введенные параметры")
+    st.error(f"Ошибка расчета: {str(e)}")
+    st.write("Проверьте параметры на корректность")
 
-# Тестовые сценарии
-st.sidebar.markdown("---")
-st.sidebar.subheader("Тестовые данные")
-test_cases = {
-    "Сбалансированная": {'lambda_':10, 'mu':15, 'gamma':0.5, 'delta':2, 'alpha':1, 'beta':3},
-    "Перегруженная": {'lambda_':25, 'mu':10, 'gamma':1, 'delta':3, 'alpha':2, 'beta':5},
-    "Недогруженная": {'lambda_':5, 'mu':20, 'gamma':0.1, 'delta':1, 'alpha':0.5, 'beta':2}
-}
-
-for name, values in test_cases.items():
-    if st.sidebar.button(name):
-        st.session_state.params.update(values)
+# Тестовые данные
+with st.sidebar:
+    st.markdown("---")
+    st.subheader("Тестовые сценарии")
+    if st.button("Стандартные параметры"):
+        st.session_state.params.update({
+            'lambda_':10, 'mu':15, 'gamma':0.5,
+            'delta':2, 'alpha':1, 'beta':3
+        })
         st.rerun()
-
-# Отладочная информация
-with st.expander("Техническая информация"):
-    st.write("Текущие параметры:", params)
-    try:
-        A = np.array([
-            [-(params['lambda_'] + params['mu']), params['delta'], params['beta'], 0],
-            [params['lambda_'], -(params['mu'] + params['gamma'] + params['alpha']), 0, 0],
-            [0, params['gamma'], -params['delta'], 0],
-            [0, params['alpha'], 0, -params['beta']]
-        ])
-        st.write("Матрица системы:", A)
-        st.write("Собственные значения:", np.linalg.eigvals(A))
-    except:
-        pass

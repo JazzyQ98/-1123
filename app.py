@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import simpy
 import streamlit as st
 from io import BytesIO
-st.write(f"Python: {sys.version}")
+st.write(f"Тип params: {type(params)}")  # Должно быть: <class 'dict'>
 st.write(f"SimPy version: {simpy.version}")
 
 # Настройка страницы

@@ -1,113 +1,270 @@
-import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+import simpy
+import streamlit as st
+from io import BytesIO
 
-# Инициализация параметров
-if 'params' not in st.session_state:
-    st.session_state.params = {
-        'lambda_': 10.0,  # интенсивность входящего потока
-        'mu': 15.0,       # интенсивность обработки
-        'gamma': 0.5,     # интенсивность сбоев
-        'delta': 2.0,     # интенсивность восстановления
-        'alpha': 1.0,     # интенсивность перегрузки
-        'beta': 3.0       # интенсивность восстановления буфера
-    }
+# Настройка страницы
+st.set_page_config(layout="wide", page_title="Моделирование СОИСН")
+st.title("Имитационная модель системы обработки информации специального назначения")
+st.markdown("""
+Дипломная работа Бирюкова Д.Р.  
+*Исследование установившегося режима функционирования СОИСН*
+""")
 
-def calculate_probabilities(params):
-    """Гарантированно рабочая функция расчета"""
-    try:
-        λ, μ, γ, δ, α, β = params.values()
-        
-        # Проверка параметров
-        if any(v < 0 for v in [λ, μ, γ, δ, α, β]):
-            raise ValueError("Параметры должны быть ≥ 0")
-        if μ == 0:
-            raise ValueError("μ не может быть 0")
-
-        # Матрица коэффициентов (проверенная версия)
-        A = np.array([
-            [-λ, μ, δ, β],
-            [λ, -(μ + γ + α), 0, 0],
-            [0, γ, -δ, 0],
-            [0, α, 0, -β],
-            [1, 1, 1, 1]  # условие нормировки
-        ])
-        
-        b = np.array([0, 0, 0, 0, 1])
-        
-        # Решение системы
-        pi = np.linalg.lstsq(A, b, rcond=None)[0]
-        pi = np.abs(pi) / np.sum(np.abs(pi))  # нормировка
-        
-        return {
-            'waiting': pi[0],    # π₀ - ожидание
-            'processing': pi[1], # π₁ - обработка
-            'failure': pi[2],    # π₂ - сбой
-            'overload': pi[3]    # π₃ - перегрузка
-        }
-        
-    except Exception as e:
-        st.error(f"Ошибка расчета: {str(e)}")
-        return None
-
-# Интерфейс
-st.title("Модель СОИСН")
-st.markdown("Расчет стационарных вероятностей состояний")
-
-# Панель управления
+# Боковая панель с параметрами
 with st.sidebar:
     st.header("Параметры системы")
-    p = st.session_state.params
-    
-    # Слайдеры с правильными подписями
-    p['lambda_'] = st.slider("λ (входящий поток, 1/час)", 0.1, 30.0, p['lambda_'], 0.1)
-    p['mu'] = st.slider("μ (обработка, 1/час)", 0.1, 30.0, p['mu'], 0.1)
-    p['gamma'] = st.slider("γ (сбои, 1/час)", 0.01, 5.0, p['gamma'], 0.01)
-    p['delta'] = st.slider("δ (восстановление, 1/час)", 0.1, 10.0, p['delta'], 0.1)
-    p['alpha'] = st.slider("α (перегрузка, 1/час)", 0.01, 5.0, p['alpha'], 0.01)
-    p['beta'] = st.slider("β (буфер, 1/час)", 0.1, 10.0, p['beta'], 0.1)
+    simulation_time = st.slider("Время моделирования (сек)", 100, 5000, 1000)
+    lambda_ = st.slider("λ - Интенсивность входящего потока", 1.0, 30.0, 10.0)
+    mu = st.slider("μ - Интенсивность обработки", 1.0, 30.0, 15.0)
+    gamma = st.slider("γ - Интенсивность сбоев", 0.1, 5.0, 0.5)
+    delta = st.slider("δ - Интенсивность восстановления", 0.1, 5.0, 2.0)
+    alpha = st.slider("α - Интенсивность перегрузки", 0.1, 5.0, 1.0)
+    beta = st.slider("β - Интенсивность восстановления буфера", 0.1, 5.0, 3.0)
 
-# Расчет и вывод
-results = calculate_probabilities(st.session_state.params)
+    params = {
+        "lambda": lambda_,
+        "mu": mu,
+        "gamma": gamma,
+        "delta": delta,
+        "alpha": alpha,
+        "beta": beta
+    }
 
-if results:
-    # Отображение результатов
-    st.subheader("Результаты")
+# Класс модели
+class SOISN_Model:
+    def init(self, env, params):
+        self.env = env
+        self.params = params
+        self.state = "S0"
+        self.state_history = []
+        self.time_in_states = {"S0": 0, "S1": 0, "S2": 0, "S3": 0}
+        
+    def run(self):
+        while True:
+            start_time = self.env.now
+            self.state_history.append((self.env.now, self.state))
+            
+            if self.state == "S0":
+                yield self.env.timeout(np.random.exponential(1/self.params["lambda"]))
+                self.state = "S1"
+                
+            elif self.state == "S1":
+                rates = {
+                    "S0": self.params["mu"],
+                    "S2": self.params["gamma"],
+                    "S3": self.params["alpha"]
+                }
+                total_rate = sum(rates.values())
+                next_state = np.random.choice(
+                    list(rates.keys()),
+                    p=[r/total_rate for r in rates.values()]
+                )
+                yield self.env.timeout(np.random.exponential(1/total_rate))
+                self.state = next_state
+                
+            elif self.state == "S2":
+                yield self.env.timeout(np.random.exponential(1/self.params["delta"]))
+                self.state = "S0"
+                
+            elif self.state == "S3":
+                yield self.env.timeout(np.random.exponential(1/self.params["beta"]))
+                self.state = "S0"
+            
+            self.time_in_states[self.state_history[-1][1]] += self.env.now - start_time
+
+# Функция для аналитического расчета
+def calculate_analytic(params):
+    lambda_ = params["lambda"]
+    mu = params["mu"]
+    gamma = params["gamma"]
+    delta = params["delta"]
+    alpha = params["alpha"]
+    beta = params["beta"]
     
+    # Коэффициенты для СЛАУ
+    denom = mu + gamma + alpha
+    pi_1 = lambda_ / denom
+    
+    pi_2 = (gamma / delta) * pi_1
+    pi_3 = (alpha / beta) * pi_1
+    
+    pi_0 = 1 / (1 + pi_1 + pi_2 + pi_3)
+    pi_1 *= pi_0
+    pi_2 *= pi_0
+    pi_3 *= pi_0
+    
+    return {
+        "S0": pi_0,
+        "S1": pi_1,
+        "S2": pi_2,
+        "S3": pi_3
+    }
+
+# Запуск моделирования
+def run_simulation():
+    env = simpy.Environment()
+    model = SOISN_Model(env, params)
+    env.process(model.run())
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i in range(simulation_time):
+        env.run(until=i+1)
+        progress = (i+1)/simulation_time
+        progress_bar.progress(progress)
+        status_text.text(f"Прогресс: {int(progress*100)}%")
+    
+    total_time = sum(model.time_in_states.values())
+    pi_sim = {state: t/total_time for state, t in model.time_in_states.items()}
+    pi_analytic = calculate_analytic(params)
+    
+    return model, pi_sim, pi_analytic
+
+# Визуализация
+def plot_results(model, pi_sim, pi_analytic):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # График состояний
+    times, states = zip(*model.state_history)
+    state_codes = {"S0": 0, "S1": 1, "S2": 2, "S3": 3}
+    coded_states = [state_codes[s] for s in states]
+    
+    ax1.step(times, coded_states, where="post")
+    ax1.set_yticks([0, 1, 2, 3])
+    ax1.set_yticklabels(["S0 (Ожидание)", "S1 (Обработка)", "S2 (Сбой)", "S3 (Перегрузка)"])
+    ax1.set_xlabel("Время (сек)")
+    ax1.set_title("Динамика состояний системы")
+    ax1.grid(True)
+    
+    # График вероятностей
+    states = list(pi_sim.keys())
+    sim_probs = list(pi_sim.values())
+    analytic_probs = [pi_analytic[s] for s in states]
+    
+    x = np.arange(len(states))
+    width = 0.35
+    
+    ax2.bar(x - width/2, sim_probs, width, label='Имитация', color='royalblue')
+    ax2.bar(x + width/2, analytic_probs, width, label='Аналитика', color='orange')
+    
+    for i, (sim, ana) in enumerate(zip(sim_probs, analytic_probs)):
+        ax2.text(i - width/2, sim + 0.01, f"{sim:.3f}", ha='center')
+        ax2.text(i + width/2, ana + 0.01, f"{ana:.3f}", ha='center')
+    
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(states)
+    ax2.set_ylabel("Вероятность")
+    ax2.set_title("Сравнение вероятностей")
+    ax2.legend()
+    ax2.grid(True)
+    
+    plt.tight_layout()
+    return fig
+
+# Основной блок
+if st.button("Запустить моделирование"):
+    with st.spinner("Идет моделирование..."):
+        model, pi_sim, pi_analytic = run_simulation()
+    
+    st.success("Моделирование завершено!")
+    
+    # Вывод результатов
     col1, col2 = st.columns(2)
+    
     with col1:
-        st.metric("Ожидание (π₀)", f"{results['waiting']*100:.2f}%")
-        st.metric("Сбой (π₂)", f"{results['failure']*100:.2f}%")
+        st.subheader("Параметры системы")
+        st.write(f"λ (входящий поток): {params['lambda']:.1f}")
+        st.write(f"μ (обработка): {params['mu']:.1f}")
+        st.write(f"γ (сбои): {params['gamma']:.1f}")
+        st.write(f"δ (восстановление): {params['delta']:.1f}")
+        st.write(f"α (перегрузка): {params['alpha']:.1f}")
+        st.write(f"β (восстановление буфера): {params['beta']:.1f}")
+    
     with col2:
-        st.metric("Обработка (π₁)", f"{results['processing']*100:.2f}%")
-        st.metric("Перегрузка (π₃)", f"{results['overload']*100:.2f}%")
+        st.subheader("Результаты")
+        st.write("Имитационные вероятности:")
+        for state, prob in pi_sim.items():
+            st.write(f"- {state}: {prob:.4f} ({prob*100:.1f}%)")
+        
+        st.write("Аналитические вероятности:")
+        for state, prob in pi_analytic.items():
+            st.write(f"- {state}: {prob:.4f} ({prob*100:.1f}%)")
     
-    # Коэффициент загрузки
-    ρ = p['lambda_'] / p['mu']
-    st.metric("Коэффициент загрузки (ρ)", f"{ρ:.2f}", 
-             delta="Перегрузка!" if ρ > 1 else "Норма")
-    
-    # График
-    fig, ax = plt.subplots(figsize=(10,4))
-    states = ['Ожидание', 'Обработка', 'Сбой', 'Перегрузка']
-    prob = [results['waiting'], results['processing'], 
-           results['failure'], results['overload']]
-    colors = ['#4CAF50', '#2196F3', '#FF9800', '#F44336']
-    
-    ax.bar(states, prob, color=colors)
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Вероятность")
+    # Графики
+    st.subheader("Визуализация результатов")
+    fig = plot_results(model, pi_sim, pi_analytic)
     st.pyplot(fig)
     
-    # Проверка
-    st.write(f"Сумма вероятностей: {sum(prob):.6f} (должна быть 1.0)")
+    # Коэффициент загрузки
+    rho = params['lambda'] / params['mu']
+    st.metric("Коэффициент загрузки (ρ)", f"{rho:.2f}", 
+              help="ρ = λ/μ. При ρ > 1 система не справляется с нагрузкой")
+    
+    # Экспорт результатов
+    st.subheader("Экспорт результатов")
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=300)
+    st.download_button(
+        label="Скачать графики",
+        data=buf.getvalue(),
+        file_name="soisn_results.png",
+        mime="image/png"
+    )
+    
+    # Отчет
+    report = f"""
+    Отчет по моделированию СОИСН
+    ============================
+    Параметры:
+    - λ = {params['lambda']:.1f}
+    - μ = {params['mu']:.1f}
+    - γ = {params['gamma']:.1f}
+    - δ = {params['delta']:.1f}
+    - α = {params['alpha']:.1f}
+    - β = {params['beta']:.1f}
+    
+    Результаты:
+    - Коэффициент загрузки ρ = {rho:.2f}
+    
+    Вероятности состояний:
+    | Состояние | Имитация | Аналитика |
+    |-----------|----------|-----------|
+    | S0        | {pi_sim['S0']:.4f} | {pi_analytic['S0']:.4f} |
+    | S1        | {pi_sim['S1']:.4f} | {pi_analytic['S1']:.4f} |
+    | S2        | {pi_sim['S2']:.4f} | {pi_analytic['S2']:.4f} |
+    | S3        | {pi_sim['S3']:.4f} | {pi_analytic['S3']:.4f} |
+    """
+    
+    st.download_button(
+        label="Скачать отчет (TXT)",
+        data=report.encode("utf-8"),
+        file_name="soisn_report.txt",
+        mime="text/plain"
+    )
 
-# Тестовые данные
-with st.sidebar:
-    st.markdown("---")
-    if st.button("Тест: стандартные параметры"):
-        st.session_state.params.update({
-            'lambda_': 10.0, 'mu': 15.0, 'gamma': 0.5,
-            'delta': 2.0, 'alpha': 1.0, 'beta': 3.0
-        })
-        st.rerun()
+# Описание модели
+with st.expander("Описание модели"):
+    st.markdown("""
+    ### Модель системы обработки информации специального назначения (СОИСН)
+    
+    Состояния системы:
+    1. S0 (Ожидание) - система готова к обработке сообщений
+    2. S1 (Обработка) - активная обработка сообщения
+    3. S2 (Сбой) - восстановление после отказа
+    4. S3 (Перегрузка) - буфер переполнен, требуется восстановление
+    
+    Параметры переходов:
+    - λ - интенсивность входящего потока сообщений
+    - μ - интенсивность обработки сообщений
+    - γ - интенсивность возникновения сбоев
+    - δ - интенсивность восстановления после сбоя
+    - α - интенсивность перехода в состояние перегрузки
+    - β - интенсивность восстановления буфера
+    
+    Теоретическая основа:
+    - Марковский процесс с непрерывным временем
+    - Уравнения Колмогорова для предельных вероятностей
+    """)

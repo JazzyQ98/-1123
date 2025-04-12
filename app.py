@@ -35,6 +35,11 @@ with st.sidebar:
 # Класс модели
 class SOISN_Model:
     def init(self, env, params):
+        if not isinstance(env, simpy.Environment):
+            raise TypeError("env должен быть объектом simpy.Environment")
+        if not isinstance(params, dict):
+            raise TypeError("params должен быть словарем")
+        
         self.env = env
         self.params = params
         self.state = "S0"

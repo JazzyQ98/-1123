@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import simpy
 import streamlit as st
 from io import BytesIO
+st.write(f"Python: {sys.version}")
+st.write(f"SimPy version: {simpy.version}")
 
 # Настройка страницы
 st.set_page_config(layout="wide", page_title="Моделирование СОИСН")

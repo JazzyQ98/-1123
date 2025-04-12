@@ -83,31 +83,34 @@ class SOISN_Model:
 
 # Функция для аналитического расчета
 def calculate_analytic(params):
-    lambda_ = params["lambda"]
-    mu = params["mu"]
-    gamma = params["gamma"]
-    delta = params["delta"]
-    alpha = params["alpha"]
-    beta = params["beta"]
-    
-    # Коэффициенты для СЛАУ
-    denom = mu + gamma + alpha
-    pi_1 = lambda_ / denom
-    
-    pi_2 = (gamma / delta) * pi_1
-    pi_3 = (alpha / beta) * pi_1
-    
-    pi_0 = 1 / (1 + pi_1 + pi_2 + pi_3)
-    pi_1 *= pi_0
-    pi_2 *= pi_0
-    pi_3 *= pi_0
-    
-    return {
-        "S0": pi_0,
-        "S1": pi_1,
-        "S2": pi_2,
-        "S3": pi_3
-    }
+    try:
+        lambda_ = params["lambda"]
+        mu = params["mu"]
+        gamma = params["gamma"]
+        delta = params["delta"]
+        alpha = params["alpha"]
+        beta = params["beta"]
+        
+        # Проверка деления на ноль
+        denom = mu + gamma + alpha
+        if denom == 0:
+            raise ValueError("Знаменатель не может быть нулевым")
+        
+        pi_1 = lambda_ / denom
+        pi_2 = (gamma / delta) * pi_1 if delta != 0 else 0
+        pi_3 = (alpha / beta) * pi_1 if beta != 0 else 0
+        
+        pi_0 = 1 / (1 + pi_1 + pi_2 + pi_3)
+        
+        return {
+            "S0": pi_0,
+            "S1": pi_1 * pi_0,
+            "S2": pi_2 * pi_0,
+            "S3": pi_3 * pi_0
+        }
+    except Exception as e:
+        st.error(f"Ошибка в calculate_analytic(): {str(e)}")
+        return {"S0": 0, "S1": 0, "S2": 0, "S3": 0}  # Возвращаем нули при ошибке
 
 # Запуск моделирования
 def run_simulation():

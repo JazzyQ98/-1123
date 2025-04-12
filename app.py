@@ -2,35 +2,29 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 
-# 1. Инициализация параметров (гарантированно правильные начальные значения)
-DEFAULT_PARAMS = {
-    'lambda_': 10.0,  # интенсивность входящего потока
-    'mu': 15.0,       # интенсивность обработки
-    'gamma': 0.5,     # интенсивность сбоев
-    'delta': 2.0,     # интенсивность восстановления
-    'alpha': 1.0,     # интенсивность перегрузки
-    'beta': 3.0       # интенсивность восстановления буфера
-}
-
+# Инициализация параметров
 if 'params' not in st.session_state:
-    st.session_state.params = DEFAULT_PARAMS.copy()
+    st.session_state.params = {
+        'lambda_': 10.0,  # интенсивность входящего потока
+        'mu': 15.0,       # интенсивность обработки
+        'gamma': 0.5,     # интенсивность сбоев
+        'delta': 2.0,     # интенсивность восстановления
+        'alpha': 1.0,     # интенсивность перегрузки
+        'beta': 3.0       # интенсивность восстановления буфера
+    }
 
-# 2. Функция расчета (полностью переработанная)
 def calculate_probabilities(params):
     """Гарантированно рабочая функция расчета"""
     try:
-        λ, μ, γ, δ, α, β = (
-            params['lambda_'], params['mu'], params['gamma'],
-            params['delta'], params['alpha'], params['beta']
-        )
+        λ, μ, γ, δ, α, β = params.values()
         
-        # Проверка входных параметров
+        # Проверка параметров
         if any(v < 0 for v in [λ, μ, γ, δ, α, β]):
-            raise ValueError("Все параметры должны быть ≥ 0")
+            raise ValueError("Параметры должны быть ≥ 0")
         if μ == 0:
-            raise ValueError("μ не может быть нулевым")
+            raise ValueError("μ не может быть 0")
 
-        # Матрица системы (проверенная формула)
+        # Матрица коэффициентов (проверенная версия)
         A = np.array([
             [-λ, μ, δ, β],
             [λ, -(μ + γ + α), 0, 0],
@@ -43,50 +37,43 @@ def calculate_probabilities(params):
         
         # Решение системы
         pi = np.linalg.lstsq(A, b, rcond=None)[0]
-        pi = np.abs(pi)  # избегаем отрицательных значений
-        pi /= pi.sum()   # нормировка
+        pi = np.abs(pi) / np.sum(np.abs(pi))  # нормировка
         
         return {
-            'waiting': pi[0],     # π₀ - ожидание
-            'processing': pi[1],  # π₁ - обработка
-            'failure': pi[2],     # π₂ - сбой
-            'overload': pi[3]     # π₃ - перегрузка
+            'waiting': pi[0],    # π₀ - ожидание
+            'processing': pi[1], # π₁ - обработка
+            'failure': pi[2],    # π₂ - сбой
+            'overload': pi[3]    # π₃ - перегрузка
         }
         
     except Exception as e:
         st.error(f"Ошибка расчета: {str(e)}")
         return None
 
-# 3. Интерфейс (максимально простой и понятный)
+# Интерфейс
 st.title("Модель СОИСН")
-st.markdown("Расчет вероятностей состояний системы")
+st.markdown("Расчет стационарных вероятностей состояний")
 
 # Панель управления
 with st.sidebar:
-    st.header("Управление")
-    
-    # Слайдеры параметров
+    st.header("Параметры системы")
     p = st.session_state.params
-    p['lambda_'] = st.slider("λ (входящий поток)", 0.1, 30.0, p['lambda_'], 0.1)
-    p['mu'] = st.slider("μ (обработка)", 0.1, 30.0, p['mu'], 0.1)
-    p['gamma'] = st.slider("γ (сбои)", 0.01, 5.0, p['gamma'], 0.01)
-    p['delta'] = st.slider("δ (восстановление)", 0.1, 10.0, p['delta'], 0.1)
-    p['alpha'] = st.slider("α (перегрузка)", 0.01, 5.0, p['alpha'], 0.01)
-    p['beta'] = st.slider("β (буфер)", 0.1, 10.0, p['beta'], 0.1)
     
-    # Кнопка сброса
-    if st.button("Сбросить параметры"):
-        st.session_state.params = DEFAULT_PARAMS.copy()
-        st.rerun()
+    # Слайдеры с правильными подписями
+    p['lambda_'] = st.slider("λ (входящий поток, 1/час)", 0.1, 30.0, p['lambda_'], 0.1)
+    p['mu'] = st.slider("μ (обработка, 1/час)", 0.1, 30.0, p['mu'], 0.1)
+    p['gamma'] = st.slider("γ (сбои, 1/час)", 0.01, 5.0, p['gamma'], 0.01)
+    p['delta'] = st.slider("δ (восстановление, 1/час)", 0.1, 10.0, p['delta'], 0.1)
+    p['alpha'] = st.slider("α (перегрузка, 1/час)", 0.01, 5.0, p['alpha'], 0.01)
+    p['beta'] = st.slider("β (буфер, 1/час)", 0.1, 10.0, p['beta'], 0.1)
 
-# Основной блок
+# Расчет и вывод
 results = calculate_probabilities(st.session_state.params)
 
 if results:
     # Отображение результатов
     st.subheader("Результаты")
     
-    # Метрики
     col1, col2 = st.columns(2)
     with col1:
         st.metric("Ожидание (π₀)", f"{results['waiting']*100:.2f}%")
@@ -97,8 +84,7 @@ if results:
     
     # Коэффициент загрузки
     ρ = p['lambda_'] / p['mu']
-    st.metric("Коэффициент загрузки (ρ)", 
-             f"{ρ:.2f}", 
+    st.metric("Коэффициент загрузки (ρ)", f"{ρ:.2f}", 
              delta="Перегрузка!" if ρ > 1 else "Норма")
     
     # График
@@ -106,12 +92,22 @@ if results:
     states = ['Ожидание', 'Обработка', 'Сбой', 'Перегрузка']
     prob = [results['waiting'], results['processing'], 
            results['failure'], results['overload']]
-    colors = ['#2ecc71', '#3498db', '#e74c3c', '#f39c12']
+    colors = ['#4CAF50', '#2196F3', '#FF9800', '#F44336']
     
     ax.bar(states, prob, color=colors)
     ax.set_ylim(0, 1)
-    ax.set_title("Распределение вероятностей состояний")
+    ax.set_ylabel("Вероятность")
     st.pyplot(fig)
     
     # Проверка
     st.write(f"Сумма вероятностей: {sum(prob):.6f} (должна быть 1.0)")
+
+# Тестовые данные
+with st.sidebar:
+    st.markdown("---")
+    if st.button("Тест: стандартные параметры"):
+        st.session_state.params.update({
+            'lambda_': 10.0, 'mu': 15.0, 'gamma': 0.5,
+            'delta': 2.0, 'alpha': 1.0, 'beta': 3.0
+        })
+        st.rerun()

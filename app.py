@@ -1,52 +1,33 @@
+import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import simpy
-import streamlit as st
 from io import BytesIO
-st.write(f"Тип params: {type(params)}")  # Должно быть: <class 'dict'>
+import sys
+from importlib.metadata import version  # Для Python 3.12+
 
-# Настройка страницы
-st.set_page_config(layout="wide", page_title="Моделирование СОИСН")
-st.title("Имитационная модель системы обработки информации специального назначения")
-st.markdown("""
-Дипломная работа Бирюкова Д.Р.  
-*Исследование установившегося режима функционирования СОИСН*
-""")
+# Проверка версий
+st.sidebar.markdown("### Версии библиотек")
+try:
+    st.sidebar.code(f"""
+    Python: {sys.version.split()[0]}
+    NumPy: {version('numpy')}
+    Matplotlib: {version('matplotlib')}
+    SimPy: {version('simpy')}
+    Streamlit: {version('streamlit')}
+    """)
+except Exception as e:
+    st.sidebar.error(f"Ошибка проверки версий: {e}")
 
-# Боковая панель с параметрами
-with st.sidebar:
-    st.header("Параметры системы")
-    simulation_time = st.slider("Время моделирования (сек)", 100, 5000, 1000)
-    lambda_ = st.slider("λ - Интенсивность входящего потока", 1.0, 30.0, 10.0)
-    mu = st.slider("μ - Интенсивность обработки", 1.0, 30.0, 15.0)
-    gamma = st.slider("γ - Интенсивность сбоев", 0.1, 5.0, 0.5)
-    delta = st.slider("δ - Интенсивность восстановления", 0.1, 5.0, 2.0)
-    alpha = st.slider("α - Интенсивность перегрузки", 0.1, 5.0, 1.0)
-    beta = st.slider("β - Интенсивность восстановления буфера", 0.1, 5.0, 3.0)
-
-    params = {
-        "lambda": lambda_,
-        "mu": mu,
-        "gamma": gamma,
-        "delta": delta,
-        "alpha": alpha,
-        "beta": beta
-    }
-
-# Класс модели
+# Модель системы
 class SOISN_Model:
     def init(self, env, params):
-        if not isinstance(env, simpy.Environment):
-            raise TypeError("env должен быть объектом simpy.Environment")
-        if not isinstance(params, dict):
-            raise TypeError("params должен быть словарем")
-        
         self.env = env
         self.params = params
         self.state = "S0"
         self.state_history = []
         self.time_in_states = {"S0": 0, "S1": 0, "S2": 0, "S3": 0}
-        
+    
     def run(self):
         while True:
             start_time = self.env.now
@@ -80,200 +61,120 @@ class SOISN_Model:
             
             self.time_in_states[self.state_history[-1][1]] += self.env.now - start_time
 
-# Функция для аналитического расчета
-def calculate_analytic(params):
-    try:
-        lambda_ = params["lambda"]
-        mu = params["mu"]
-        gamma = params["gamma"]
-        delta = params["delta"]
-        alpha = params["alpha"]
-        beta = params["beta"]
-        
-        # Проверка деления на ноль
-        denom = mu + gamma + alpha
-        if denom == 0:
-            raise ValueError("Знаменатель не может быть нулевым")
-        
-        pi_1 = lambda_ / denom
-        pi_2 = (gamma / delta) * pi_1 if delta != 0 else 0
-        pi_3 = (alpha / beta) * pi_1 if beta != 0 else 0
-        
-        pi_0 = 1 / (1 + pi_1 + pi_2 + pi_3)
-        
-        return {
-            "S0": pi_0,
-            "S1": pi_1 * pi_0,
-            "S2": pi_2 * pi_0,
-            "S3": pi_3 * pi_0
-        }
-    except Exception as e:
-        st.error(f"Ошибка в calculate_analytic(): {str(e)}")
-        return {"S0": 0, "S1": 0, "S2": 0, "S3": 0}  # Возвращаем нули при ошибке
+# Интерфейс Streamlit
+st.title("Моделирование СОИСН (Python 3.12+)")
+st.markdown("""
+Исследование установившегося режима системы обработки информации специального назначения
+""")
+
+# Параметры в сайдбаре
+with st.sidebar:
+    st.header("Параметры системы")
+    params = {
+        "lambda": st.slider("λ - Интенсивность входящего потока", 0.1, 30.0, 10.0),
+        "mu": st.slider("μ - Интенсивность обработки", 0.1, 30.0, 15.0),
+        "gamma": st.slider("γ - Интенсивность сбоев", 0.1, 5.0, 0.5),
+        "delta": st.slider("δ - Интенсивность восстановления", 0.1, 5.0, 2.0),
+        "alpha": st.slider("α - Интенсивность перегрузки", 0.1, 5.0, 1.0),
+        "beta": st.slider("β - Интенсивность восстановления буфера", 0.1, 5.0, 3.0)
+    }
+    simulation_time = st.slider("Время моделирования (сек)", 100, 2000, 500)
 
 # Запуск моделирования
-def run_simulation():
-    env = simpy.Environment()
-    model = SOISN_Model(env, params)
-    env.process(model.run())
-    
+if st.button("Запустить моделирование"):
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    for i in range(simulation_time):
-        env.run(until=i+1)
-        progress = (i+1)/simulation_time
-        progress_bar.progress(progress)
-        status_text.text(f"Прогресс: {int(progress*100)}%")
-    
-    total_time = sum(model.time_in_states.values())
-    pi_sim = {state: t/total_time for state, t in model.time_in_states.items()}
-    pi_analytic = calculate_analytic(params)
-    
-    return model, pi_sim, pi_analytic
-
-# Визуализация
-def plot_results(model, pi_sim, pi_analytic):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    
-    # График состояний
-    times, states = zip(*model.state_history)
-    state_codes = {"S0": 0, "S1": 1, "S2": 2, "S3": 3}
-    coded_states = [state_codes[s] for s in states]
-    
-    ax1.step(times, coded_states, where="post")
-    ax1.set_yticks([0, 1, 2, 3])
-    ax1.set_yticklabels(["S0 (Ожидание)", "S1 (Обработка)", "S2 (Сбой)", "S3 (Перегрузка)"])
-    ax1.set_xlabel("Время (сек)")
-    ax1.set_title("Динамика состояний системы")
-    ax1.grid(True)
-    
-    # График вероятностей
-    states = list(pi_sim.keys())
-    sim_probs = list(pi_sim.values())
-    analytic_probs = [pi_analytic[s] for s in states]
-    
-    x = np.arange(len(states))
-    width = 0.35
-    
-    ax2.bar(x - width/2, sim_probs, width, label='Имитация', color='royalblue')
-    ax2.bar(x + width/2, analytic_probs, width, label='Аналитика', color='orange')
-    
-    for i, (sim, ana) in enumerate(zip(sim_probs, analytic_probs)):
-        ax2.text(i - width/2, sim + 0.01, f"{sim:.3f}", ha='center')
-        ax2.text(i + width/2, ana + 0.01, f"{ana:.3f}", ha='center')
-    
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(states)
-    ax2.set_ylabel("Вероятность")
-    ax2.set_title("Сравнение вероятностей")
-    ax2.legend()
-    ax2.grid(True)
-    
-    plt.tight_layout()
-    return fig
-
-# Основной блок
-if st.button("Запустить моделирование"):
-    with st.spinner("Идет моделирование..."):
-        model, pi_sim, pi_analytic = run_simulation()
-    
-    st.success("Моделирование завершено!")
-    
-    # Вывод результатов
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Параметры системы")
-        st.write(f"λ (входящий поток): {params['lambda']:.1f}")
-        st.write(f"μ (обработка): {params['mu']:.1f}")
-        st.write(f"γ (сбои): {params['gamma']:.1f}")
-        st.write(f"δ (восстановление): {params['delta']:.1f}")
-        st.write(f"α (перегрузка): {params['alpha']:.1f}")
-        st.write(f"β (восстановление буфера): {params['beta']:.1f}")
-    
-    with col2:
-        st.subheader("Результаты")
-        st.write("Имитационные вероятности:")
-        for state, prob in pi_sim.items():
-            st.write(f"- {state}: {prob:.4f} ({prob*100:.1f}%)")
+    try:
+        status_text.text("Инициализация модели...")
+        env = simpy.Environment()
+        model = SOISN_Model(env, params)
+        env.process(model.run())
         
-        st.write("Аналитические вероятности:")
-        for state, prob in pi_analytic.items():
-            st.write(f"- {state}: {prob:.4f} ({prob*100:.1f}%)")
-    
-    # Графики
-    st.subheader("Визуализация результатов")
-    fig = plot_results(model, pi_sim, pi_analytic)
-    st.pyplot(fig)
-    
-    # Коэффициент загрузки
-    rho = params['lambda'] / params['mu']
-    st.metric("Коэффициент загрузки (ρ)", f"{rho:.2f}", 
-              help="ρ = λ/μ. При ρ > 1 система не справляется с нагрузкой")
-    
-    # Экспорт результатов
-    st.subheader("Экспорт результатов")
-    buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=300)
-    st.download_button(
-        label="Скачать графики",
-        data=buf.getvalue(),
-        file_name="soisn_results.png",
-        mime="image/png"
-    )
-    
-    # Отчет
-    report = f"""
-    Отчет по моделированию СОИСН
-    ============================
-    Параметры:
-    - λ = {params['lambda']:.1f}
-    - μ = {params['mu']:.1f}
-    - γ = {params['gamma']:.1f}
-    - δ = {params['delta']:.1f}
-    - α = {params['alpha']:.1f}
-    - β = {params['beta']:.1f}
-    
-    Результаты:
-    - Коэффициент загрузки ρ = {rho:.2f}
-    
-    Вероятности состояний:
-    | Состояние | Имитация | Аналитика |
-    |-----------|----------|-----------|
-    | S0        | {pi_sim['S0']:.4f} | {pi_analytic['S0']:.4f} |
-    | S1        | {pi_sim['S1']:.4f} | {pi_analytic['S1']:.4f} |
-    | S2        | {pi_sim['S2']:.4f} | {pi_analytic['S2']:.4f} |
-    | S3        | {pi_sim['S3']:.4f} | {pi_analytic['S3']:.4f} |
-    """
-    
-    st.download_button(
-        label="Скачать отчет (TXT)",
-        data=report.encode("utf-8"),
-        file_name="soisn_report.txt",
-        mime="text/plain"
-    )
+        status_text.text("Идет моделирование...")
+        for i in range(simulation_time):
+            env.run(until=i+1)
+            progress_bar.progress((i+1)/simulation_time)
+        
+        # Расчет результатов
+        total_time = max(1e-6, sum(model.time_in_states.values()))
+        pi_sim = {state: t/total_time for state, t in model.time_in_states.items()}
+        
+        # Визуализация
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        
+        # График динамики состояний
+        if model.state_history:
+            times, states = zip(*model.state_history[:1000])  # Берем первые 1000 точек для производительности
 
-# Описание модели
-with st.expander("Описание модели"):
+state_codes = {"S0": 0, "S1": 1, "S2": 2, "S3": 3}
+ax1.step(times, [state_codes[s] for s in states], where="post")
+ax1.set_yticks([0, 1, 2, 3])
+ax1.set_yticklabels(["Ожидание (S0)", "Обработка (S1)", "Сбой (S2)", "Перегрузка (S3)"])
+ax1.set_xlabel("Время (сек)")
+ax1.set_title("Динамика состояний")
+ax1.grid(True)
+        
+        # График вероятностей
+        states = list(pi_sim.keys())
+        probs = list(pi_sim.values())
+        colors = ["#4CAF50", "#2196F3", "#F44336", "#FF9800"]
+        bars = ax2.bar(states, probs, color=colors)
+        ax2.set_xlabel("Состояние")
+        ax2.set_ylabel("Вероятность")
+        ax2.set_title("Предельные вероятности")
+        ax2.grid(True)
+        
+        for bar in bars:
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                    f"{height:.3f}", ha='center', va='bottom')
+        
+        plt.tight_layout()
+        
+        # Вывод результатов
+        st.success("Моделирование завершено!")
+        st.pyplot(fig)
+        
+        # Таблица результатов
+        st.subheader("Результаты")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("Параметры системы:")
+            for param, value in params.items():
+                st.text(f"{param}: {value:.2f}")
+        
+        with col2:
+            st.markdown("Вероятности состояний:")
+            for state, prob in pi_sim.items():
+                st.text(f"{state}: {prob:.4f} ({prob*100:.1f}%)")
+        
+        # Коэффициент загрузки
+        rho = params["lambda"] / params["mu"]
+        st.metric("Коэффициент загрузки (ρ)", f"{rho:.2f}",
+                help="ρ = λ/μ. При ρ > 1 система не справляется с нагрузкой")
+        
+ except Exception as e:
+st.error(f"Ошибка моделирования: {type(e).name}: {str(e)}")
+st.exception(e)
+     finally:
+        progress_bar.empty()
+
+# Инструкция
+with st.expander("Инструкция по использованию"):
     st.markdown("""
-    ### Модель системы обработки информации специального назначения (СОИСН)
-    
-    Состояния системы:
-    1. S0 (Ожидание) - система готова к обработке сообщений
-    2. S1 (Обработка) - активная обработка сообщения
-    3. S2 (Сбой) - восстановление после отказа
-    4. S3 (Перегрузка) - буфер переполнен, требуется восстановление
-    
-    Параметры переходов:
-    - λ - интенсивность входящего потока сообщений
-    - μ - интенсивность обработки сообщений
-    - γ - интенсивность возникновения сбоев
-    - δ - интенсивность восстановления после сбоя
-    - α - интенсивность перехода в состояние перегрузки
-    - β - интенсивность восстановления буфера
-    
-    Теоретическая основа:
-    - Марковский процесс с непрерывным временем
-    - Уравнения Колмогорова для предельных вероятностей
+    1. Установите параметры системы в левой панели
+    2. Нажмите кнопку "Запустить моделирование"
+    3. Дождитесь завершения расчета
+    4. Анализируйте результаты:
+       - График динамики состояний
+       - Вероятности каждого состояния
+       - Коэффициент загрузки системы
     """)
+
+# Дополнительная информация
+st.caption("""
+Дипломная работа Бирюкова Д.Р.  
+Краснодарское высшее военное училище, 2025
+""")
